@@ -1,52 +1,86 @@
 pipeline {
-    agent any
+    agent any                      // Run on any available agent
+
     tools {
-        jdk 'Java 17' // Name as configured in Manage Jenkins > Tools
-        maven 'Maven-3.9' // Name as configured in Manage Jenkins > Tools
+        jdk 'Java 17'                // Name you gave in Global Tool Configuration
+        maven 'Maven-3.9'
     }
+
+    environment {
+        APP_NAME = 'BookApiWithH2DBRecord-0.0.1-SNAPSHOT'   // Change if your JAR name is different
+    }
+
     stages {
         stage('Checkout Code') {
             steps {
-                // Replace with your repository URL and branch if necessary
-                git branch: 'main', url: 'https://github.com/bipulsWorkStore/Jenkins-Integration.git'
+                echo '📥 Checking out code from Git...'
+                checkout scm
             }
         }
+
         stage('Build') {
             steps {
-                // Clean and compile the project
-                sh 'mvn clean compile'
+                echo '🔨 Building the project...'
+                sh 'mvn clean compile -DskipTests'
             }
         }
-        stage('Test') {
+
+        stage('Run Tests') {
             steps {
-                // Run unit tests
+                echo '🧪 Running unit tests...'
                 sh 'mvn test'
             }
-            post {
-                // Archive test results
-                always {
-                    junit 'target/surefire-reports/*.xml'
-                }
-            }
         }
+
         stage('Package') {
             steps {
-                // Package the application into a JAR file
-                sh 'mvn package'
-            }
-            post {
-                // Archive the generated JAR artifact
-                success {
-                    archiveArtifacts artifacts: 'target/*.jar'
-                }
+                echo '📦 Packaging into executable JAR...'
+                sh 'mvn package -DskipTests'
             }
         }
-        stage('Run Application') {
+
+        stage('Archive Artifact') {
             steps {
-                // Note: This step starts the application as a background process using '&'.
-                // A real deployment may involve deploying to a Tomcat server or other environment.
-                sh 'java -jar target/*.jar &'
+                echo '💾 Archiving JAR file...'
+                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
             }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo '🚀 Deploying Spring Boot REST API...'
+                
+                // Kill any old instance (if running)
+                sh '''
+                    echo "Stopping previous application (if any)..."
+                    pkill -f "${APP_NAME}.jar" || true
+                    sleep 3
+                '''
+                
+                // Deploy and start new JAR in background
+                sh '''
+                    echo "Starting new application..."
+                    nohup java -jar target/*.jar > app.log 2>&1 &
+                    echo $! > app.pid
+                    echo "✅ Application started successfully!"
+                '''
+                
+                // Wait a few seconds and do a simple health check
+                sh '''
+                    sleep 8
+                    echo "🔍 Health check on /hello endpoint..."
+                    curl -f http://localhost:8080/hello || echo "⚠️ Health check failed (check app.log)"
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '🎉 Pipeline completed successfully! Your REST API is now live.'
+        }
+        failure {
+            echo '❌ Pipeline failed. Check console output for details.'
         }
     }
 }
